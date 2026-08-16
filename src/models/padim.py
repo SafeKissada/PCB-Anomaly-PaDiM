@@ -112,22 +112,47 @@ class PaDiM:
 
     @torch.no_grad()
     def fit(self, normal_loader) -> None:
-        logger.info("PaDiM.fit(): extracting patch features จากภาพ normal ทั้งหมด...")
-        all_embeddings = []
-        shape = None
-        for batch in normal_loader:
-            images = batch[0].to(self.device)
-            emb, shape = _embed_batch(self.extractor, images)
-            all_embeddings.append(emb.cpu())
-        self.spatial_shape = shape
-        embeddings = torch.cat(all_embeddings, dim=0)  # [N, C_total, H, W]
-        N, C_total, H, W = embeddings.shape
-        logger.info(f"Feature รวม: N={N} ภาพ, C_total={C_total}, spatial={H}x{W}")
+        logger.info(f"PaDiM.fit(): extracting patch features จากภาพ normal ทั้งหมด "
+                    f"(device={self.device})...")
 
+        # เลือก channel ก่อนเริ่ม accumulate (peek 1 batch เพื่อหา C_total) —
+        # สำคัญมากสำหรับ RAM: ถ้าเก็บ full concat feature (ทุก channel จาก
+        # layer1+2+3, ~1,792 channel สำหรับ wide_resnet50_2) ของทุกภาพไว้ก่อน
+        # แล้วค่อยเลือก channel ทีหลัง จะกิน RAM มหาศาล (เช่น dataset 1,373
+        # ภาพ ที่ spatial 56x56 ใช้ ~30GB ก่อนเลือก channel เลย) — เลือกทันที
+        # หลัง extract แต่ละ batch แทน ลด footprint เหลือ ~NUM_SELECTED_CHANNELS
+        # /C_total ของเดิม (เช่น 100/1792 ≈ 5.6%)
+        first_batch = next(iter(normal_loader))
+        first_images = first_batch[0].to(self.device)
+        sample_emb, shape = _embed_batch(self.extractor, first_images)
+        self.spatial_shape = shape
+        C_total = sample_emb.shape[1]
         n_select = min(self.cfg.NUM_SELECTED_CHANNELS, C_total)
         torch.manual_seed(self.cfg.SEED)
-        self.selected_channels = torch.randperm(C_total)[:n_select]
-        embeddings = embeddings[:, self.selected_channels, :, :].to(self.device)  # [N, C_sel, H, W]
+        self.selected_channels = torch.randperm(C_total)[:n_select].to(self.device)
+        del sample_emb, first_images
+        logger.info(f"C_total={C_total} (รวมทุก layer), เลือก {n_select} channel "
+                    f"แบบสุ่ม (seed={self.cfg.SEED}) — จะเก็บเฉพาะ channel ที่เลือก "
+                    f"ไว้ตั้งแต่ต้น เพื่อประหยัด RAM")
+
+        all_selected = []
+        n_seen, n_total = 0, len(normal_loader.dataset)
+        log_every = max(1, len(normal_loader) // 10)
+        for batch_idx, batch in enumerate(normal_loader):
+            images = batch[0].to(self.device)
+            emb, shape = _embed_batch(self.extractor, images)
+            emb = emb[:, self.selected_channels, :, :]  # เลือก channel ทันที ก่อนเก็บลง list
+            all_selected.append(emb.cpu())
+            n_seen += images.shape[0]
+            if batch_idx % log_every == 0 or n_seen == n_total:
+                logger.info(f"  feature extraction: {n_seen}/{n_total} ภาพ "
+                            f"({100*n_seen/n_total:.0f}%)")
+
+        embeddings = torch.cat(all_selected, dim=0).to(self.device)  # [N, C_sel, H, W]
+        del all_selected
+        N, _, H, W = embeddings.shape
+        logger.info(f"Feature รวม (หลังเลือก channel): N={N} ภาพ, "
+                    f"C_sel={n_select}, spatial={H}x{W}")
 
         # reshape เป็น [H*W, N, C_sel] เพื่อคำนวณ mean/cov ต่อตำแหน่งแบบ vectorized
         embeddings = embeddings.permute(2, 3, 0, 1).reshape(H * W, N, n_select)
@@ -140,7 +165,9 @@ class PaDiM:
         cov = cov + eps_eye
 
         logger.info("กำลัง invert covariance matrix ต่อตำแหน่ง "
-                    f"({H*W} ตำแหน่ง, {n_select}x{n_select} matrix ต่อตัว)...")
+                    f"({H*W} ตำแหน่ง, {n_select}x{n_select} matrix ต่อตัว) "
+                    f"— ขั้นนี้อาจใช้เวลาสักครู่ ไม่มี progress log ระหว่างทาง "
+                    f"เพราะเป็น operation เดียวรวด ไม่ได้ค้าง...")
         self.cov_inv = torch.linalg.inv(cov)  # [H*W, C_sel, C_sel]
         logger.info("PaDiM fit เสร็จแล้ว")
 

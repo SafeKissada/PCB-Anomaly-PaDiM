@@ -30,6 +30,7 @@ class Config:
         default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
     EXPERIMENT: str = "PaDiM_Baseline"
+    METHOD_NAME: str = "PaDiM"  # used by io_utils/output_docs for correct labeling — do not hardcode "PatchCore"
 
     IMAGE_SIZE: Tuple[int, int] = (224, 224)
     BATCH_SIZE: int = 16
@@ -60,6 +61,8 @@ class Config:
     # จำนวน channel ที่เลือก เช่น group 5 ที่มี normal แค่ ~130 ภาพ)
     COV_REG_EPSILON: float = 0.01
 
+
+    SCORE_METHOD: str = "mahalanobis"
 
     _DATA_ROOT_PLACEHOLDER = "dataset root path (contains good/ and defect/ subfolders)"
 

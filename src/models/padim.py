@@ -179,10 +179,11 @@ class PaDiM:
             raise RuntimeError("PaDiM.score() ถูกเรียกก่อน fit()")
 
         H, W = self.spatial_shape
-        image_scores, labels, paths, pixel_maps = [], [], [], []
+        image_scores, y_true, labels, paths = [], [], [], []
+        pixel_maps, orig_imgs, preproc_imgs = [], [], []
 
         for batch in loader:
-            images, _orig, _preproc, batch_paths, batch_labels, _size = batch
+            images, orig, preproc, batch_paths, batch_labels, _size = batch
             images = images.to(self.device)
             B = images.shape[0]
 
@@ -207,15 +208,21 @@ class PaDiM:
                                             self.cfg.HEATMAP_SIGMA)
                 pixel_maps.append(pmap_np)
                 image_scores.append(float(pmap_np.max()))
+                orig_imgs.append(orig[i].permute(1, 2, 0).cpu().numpy().astype('float32'))
+                preproc_imgs.append(preproc[i].permute(1, 2, 0).cpu().numpy().astype('float32'))
 
-            labels.extend([0 if lb == "normal" else 1 for lb in batch_labels])
+            y_true.extend([0 if lb == "normal" else 1 for lb in batch_labels])
+            labels.extend(list(batch_labels))
             paths.extend(batch_paths)
 
         return ScoreResult(
             image_scores=np.array(image_scores, dtype=np.float64),
-            labels=np.array(labels, dtype=np.int64),
+            y_true=np.array(y_true, dtype=np.int64),
+            labels=labels,
             paths=paths,
             pixel_maps=np.stack(pixel_maps, axis=0),
+            orig_imgs=np.stack(orig_imgs, axis=0),
+            preproc_imgs=np.stack(preproc_imgs, axis=0),
         )
 
 

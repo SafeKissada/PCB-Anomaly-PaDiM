@@ -46,6 +46,25 @@ _BACKBONE_FACTORY = {
                  torchvision.models.ResNet18_Weights.IMAGENET1K_V1),
     "resnet50": (torchvision.models.resnet50,
                  torchvision.models.ResNet50_Weights.IMAGENET1K_V2),
+    # ConvNeXt-Tiny — ใช้คู่กับ cfg.FEATURE_LAYERS ที่เป็นชื่อ module ของ
+    # ConvNeXt แทน ResNet (ดู mapping ด้านล่าง) ไม่ใช่ "layer2"/"layer3" แบบ
+    # ResNet family — ต้อง variant เดียวกับที่ใช้ใน main model (ConvNeXt+AE)
+    # เพื่อเทียบผลแบบ apples-to-apples (backbone เดียวกันข้าม method)
+    #
+    # ConvNeXt stage boundary -> module name mapping (สำหรับ cfg.FEATURE_LAYERS):
+    #   Stage2 (192ch) -> "features.3"
+    #   Stage3 (384ch) -> "features.5"
+    #   Stage4 (768ch) -> "features.7"
+    # ตัวอย่าง: Stage2+3 -> FEATURE_LAYERS=("features.3","features.5")
+    #          Stage3-only -> FEATURE_LAYERS=("features.5",)
+    #          Stage4-only -> FEATURE_LAYERS=("features.7",)
+    #
+    # ConvNeXt-Tiny — pair with cfg.FEATURE_LAYERS set to ConvNeXt module
+    # names (see mapping below), not ResNet-style "layer2"/"layer3" — use
+    # the same variant as the main model (ConvNeXt+AE) for an apples-to-
+    # apples backbone comparison across methods.
+    "convnext_tiny": (torchvision.models.convnext_tiny,
+                       torchvision.models.ConvNeXt_Tiny_Weights.DEFAULT),
 }
 
 
